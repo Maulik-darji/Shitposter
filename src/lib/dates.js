@@ -5,3 +5,8 @@ export function localDateKey(d = new Date()) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+export function localMonthKey(d = new Date()) {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${yyyy}-${mm}`;
+}

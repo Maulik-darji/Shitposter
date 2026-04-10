@@ -5,14 +5,28 @@ service cloud.firestore {
       allow read: if true;
 
       allow create: if request.auth != null
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 300
         && request.resource.data.text is string
-        && request.resource.data.text.size() <= 700;
+        && request.resource.data.text.size() <= 700
+        && request.resource.data.language is string
+        && request.resource.data.language.size() <= 32;
 
       // Prototype: allow signed-in users to update counters.
       allow update: if request.auth != null;
 
       allow delete: if false;
     }
+
+    match /posts/{postId}/comments/{commentId} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 700;
+      // Prototype: allow signed-in users to update counters.
+      allow update: if request.auth != null;
+      allow delete: if false;
+    }
   }
 }
-

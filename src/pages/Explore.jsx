@@ -31,8 +31,9 @@ const CATEGORY = {
   },
 };
 
-function cleanHeadline(text) {
-  const t = String(text || "").replace(/\s+/g, " ").trim();
+function cleanHeadline(post) {
+  const raw = String(post?.title || post?.text || "");
+  const t = raw.replace(/\s+/g, " ").trim();
   if (!t) return "";
   const withoutTags = t
     .replaceAll(SHIT_TAG_MARK, "#")
@@ -45,7 +46,7 @@ function cleanHeadline(text) {
 function getTopTags(posts, limit = 10) {
   const counts = new Map();
   for (const p of posts || []) {
-    const tags = extractHashtags(p?.text);
+    const tags = extractHashtags(`${p?.title || ""} ${p?.text || ""}`);
     for (const t of tags) {
       const key = String(t).toLowerCase();
       counts.set(key, (counts.get(key) || 0) + 1);
@@ -60,7 +61,7 @@ function getTopTags(posts, limit = 10) {
 function matchesCategory(post, catKey) {
   const cfg = CATEGORY[catKey];
   if (!cfg) return false;
-  const text = String(post?.text || "");
+  const text = `${post?.title || ""} ${post?.text || ""}`;
   const lower = text.toLowerCase();
   const tags = extractHashtags(text).map((t) => String(t).toLowerCase());
   if (tags.some((t) => cfg.tags.includes(t))) return true;
@@ -170,7 +171,7 @@ export default function ExplorePage() {
               <div className="exploreHeroInner">
                 <div className="exploreHeroKicker">For you</div>
                 <div className="exploreHeroTitle">💩{heroTag}</div>
-                <div className="exploreHeroSub">What people are posting right now.</div>
+                <div className="exploreHeroSub">What people are shitting about</div>
               </div>
             </section>
 
@@ -184,9 +185,9 @@ export default function ExplorePage() {
                 forYouStories.map((p) => (
                   <ExploreStoryItem
                     key={p.id}
-                    title={cleanHeadline(p.text).slice(0, 140)}
+                    title={cleanHeadline(p).slice(0, 140)}
                     meta={`${formatRelativeTime(p.createdAt)} · News`}
-                    onClick={() => setQuery(cleanHeadline(p.text).slice(0, 40))}
+                    onClick={() => setQuery(cleanHeadline(p).slice(0, 40))}
                   />
                 ))
               )}
@@ -239,9 +240,9 @@ export default function ExplorePage() {
                 activeCategoryPosts.slice(0, 18).map((p) => (
                   <ExploreStoryItem
                     key={p.id}
-                    title={cleanHeadline(p.text).slice(0, 160)}
+                    title={cleanHeadline(p).slice(0, 160)}
                     meta={`${formatRelativeTime(p.createdAt)} · ${activeCategoryLabel}`}
-                    onClick={() => setQuery(cleanHeadline(p.text).slice(0, 40))}
+                    onClick={() => setQuery(cleanHeadline(p).slice(0, 40))}
                   />
                 ))
               )}

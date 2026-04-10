@@ -9,6 +9,7 @@ import NotificationsPage from "./pages/Notifications";
 import ProfilePage from "./pages/Profile";
 import SettingsPage from "./pages/Settings";
 import ViralPage from "./pages/Viral";
+import PostThreadPage from "./pages/PostThread";
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
       <Route element={<Shell />}>
       <Route index element={<HomePage />} />
       <Route path="explore" element={<ExplorePage />} />
+      <Route path="post/:id" element={<PostThreadPage />} />
       <Route path="viral" element={<ViralPage />} />
       <Route path="notifications" element={<NotificationsPage />} />
       <Route path="messages" element={<MessagesPage />} />

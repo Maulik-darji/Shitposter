@@ -3,7 +3,7 @@ import { ShellContext } from "../layouts/Shell";
 import Post from "../components/Post";
 
 export default function ProfilePage() {
-  const { posts, bumpStat, toggleShit, ensureShit } = useContext(ShellContext);
+  const { posts, bumpStat, toggleShit, toggleLike, ensureShit } = useContext(ShellContext);
   const [tab, setTab] = useState("posts");
 
   return (
@@ -98,6 +98,7 @@ export default function ProfilePage() {
               post={post}
               onAction={bumpStat}
               onToggleShit={toggleShit}
+              onToggleLike={toggleLike}
               onEnsureShit={ensureShit}
             />
           ))}

@@ -6,21 +6,28 @@ import { ShellContext } from "../layouts/Shell";
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState("for-you");
   const {
-    composerRef,
+    composerTitleRef,
+    composerBodyRef,
     filteredPosts,
-    composerText,
-    setComposerText,
+    composerTitle,
+    setComposerTitle,
+    composerBody,
+    setComposerBody,
+    composerLanguage,
+    setComposerLanguage,
+    account,
     canPost,
     submitPost,
     bumpStat,
     toggleShit,
+    toggleLike,
     ensureShit,
   } = useContext(ShellContext);
 
   return (
     <>
       <header className="feedHeader">
-        <div className="feedTitle">Home</div>
+        <div className="feedTitle">Get your Hands Dirty</div>
         <div className="feedTabs" aria-label="Feed tabs">
           <button
             className={`feedTab ${activeTab === "for-you" ? "feedTab--active" : ""}`}
@@ -40,9 +47,15 @@ export default function HomePage() {
       </header>
 
       <Composer
-        composerRef={composerRef}
-        value={composerText}
-        onChange={setComposerText}
+        composerTitleRef={composerTitleRef}
+        composerBodyRef={composerBodyRef}
+        title={composerTitle}
+        body={composerBody}
+        onTitleChange={setComposerTitle}
+        onBodyChange={setComposerBody}
+        language={composerLanguage}
+        languages={account?.languages || ["English"]}
+        onLanguageChange={setComposerLanguage}
         onSubmit={submitPost}
         canPost={canPost}
       />
@@ -54,6 +67,7 @@ export default function HomePage() {
             post={post}
             onAction={bumpStat}
             onToggleShit={toggleShit}
+            onToggleLike={toggleLike}
             onEnsureShit={ensureShit}
           />
         ))}

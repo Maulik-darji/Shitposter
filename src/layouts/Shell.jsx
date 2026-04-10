@@ -5,9 +5,10 @@ import GlobalStyles from "../GlobalStyles";
 import brandLogo from "../components/Logo/shit_poster_logo.png";
 import { clearPosts, loadPosts, savePosts, seedIfEmpty } from "../lib/postsStorage";
 import { uid } from "../lib/utils";
-import { localDateKey } from "../lib/dates";
-import { topPostForDay, topPostOverall } from "../lib/ranking";
+import { localDateKey, localMonthKey } from "../lib/dates";
+import { topPostForDay, viralOfMonth } from "../lib/ranking";
 import { extractHashtags, normalizeHashToShit } from "../lib/hashtags";
+import { getPostReaction, setPostReaction } from "../lib/reactionsStorage";
 import { getFirebase, isFirebaseConfigured, ensureSignedIn } from "../firebase/client";
 import { createPost, incPostStat, listenToPosts } from "../firebase/posts";
 import {
@@ -16,27 +17,104 @@ import {
   saveDailyLeader,
   saveNotifications,
 } from "../lib/notificationsStorage";
+import { ensureAccount, saveAccount } from "../lib/accountStorage";
 
 export const ShellContext = React.createContext(null);
 
 const MAX_LEN = 700;
+const MAX_TITLE = 300;
 
 export default function Shell() {
   const location = useLocation();
-  const composerRef = useRef(null);
+  const composerTitleRef = useRef(null);
+  const composerBodyRef = useRef(null);
   const useFirestore = useMemo(() => isFirebaseConfigured(), []);
   const firebase = useMemo(() => (useFirestore ? getFirebase() : null), [useFirestore]);
 
+  const [account, setAccount] = useState(() => ensureAccount());
+  const [prefersDark, setPrefersDark] = useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  });
   const [posts, setPosts] = useState(() => (useFirestore ? [] : seedIfEmpty(loadPosts())));
-  const [composerText, setComposerText] = useState("");
+  const [composerTitle, setComposerTitle] = useState("");
+  const [composerBody, setComposerBody] = useState("");
+  const [composerLanguage, setComposerLanguage] = useState(() => ensureAccount().languages?.[0] || "English");
   const [query, setQuery] = useState("");
   const [notifications, setNotifications] = useState(() => loadNotifications());
 
   const todayKey = useMemo(() => localDateKey(new Date()), []);
+  const monthKey = useMemo(() => localMonthKey(new Date()), []);
 
   useEffect(() => {
     if (!useFirestore) savePosts(posts);
   }, [posts, useFirestore]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return undefined;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = (e) => setPrefersDark(Boolean(e.matches));
+    if (mq.addEventListener) mq.addEventListener("change", onChange);
+    else mq.addListener(onChange);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", onChange);
+      else mq.removeListener(onChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onAccountEvent = (e) => {
+      if (e?.detail && typeof e.detail === "object") setAccount(e.detail);
+    };
+    window.addEventListener("shitposter:account", onAccountEvent);
+    return () => window.removeEventListener("shitposter:account", onAccountEvent);
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const display = account?.display || {};
+    const themeMode = String(display.themeMode || "light"); // force light by default
+    const effectiveTheme = themeMode === "system" ? (prefersDark ? "dark" : "light") : themeMode;
+
+    if (effectiveTheme === "dark") document.documentElement.dataset.theme = "dark";
+    else document.documentElement.removeAttribute("data-theme");
+
+    const accent = String(display.accent || "default"); // default | blue | yellow | pink | purple | orange | green
+    const accents = {
+      blue: { hex: "#1d9bf0", hover: "#1a8cd8" },
+      yellow: { hex: "#ffd400", hover: "#f5c800" },
+      pink: { hex: "#f91880", hover: "#e11672" },
+      purple: { hex: "#7856ff", hover: "#6a4cf5" },
+      orange: { hex: "#ff7a00", hover: "#f26f00" },
+      green: { hex: "#00ba7c", hover: "#00a86f" },
+    };
+
+    if (accent !== "default" && accents[accent]) {
+      document.documentElement.style.setProperty("--accent", accents[accent].hex);
+      document.documentElement.style.setProperty("--accent-hover", accents[accent].hover);
+    } else {
+      document.documentElement.style.removeProperty("--accent");
+      document.documentElement.style.removeProperty("--accent-hover");
+    }
+
+    const uiScaleRaw = Number(display.uiScale);
+    const uiScale = Number.isFinite(uiScaleRaw) ? Math.max(0.9, Math.min(1.1, uiScaleRaw)) : 1;
+    document.documentElement.style.setProperty("--ui-scale", String(uiScale));
+  }, [account, prefersDark]);
+
+  function updateAccount(patch) {
+    setAccount((prev) => {
+      const next = { ...prev, ...(patch || {}) };
+      if (typeof next.username === "string") {
+        const u = next.username.trim() || "user";
+        next.username = u;
+        next.handle = `@${u.replace(/^@/, "")}`;
+      }
+      saveAccount(next);
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (!useFirestore || !firebase?.db || !firebase?.auth) return undefined;
@@ -49,7 +127,12 @@ export default function Shell() {
         unsub = listenToPosts(
           firebase.db,
           (remote) => {
-            setPosts(remote);
+            setPosts(
+              remote.map((p) => {
+                const r = getPostReaction(p.id);
+                return { ...p, didShit: r.didShit, didLike: r.didLike };
+              })
+            );
           },
           () => {}
         );
@@ -67,8 +150,7 @@ export default function Shell() {
   }, [notifications]);
 
   const viralToday = useMemo(() => topPostForDay(posts, todayKey), [posts, todayKey]);
-  const viralOverall = useMemo(() => topPostOverall(posts), [posts]);
-  const viralPost = viralToday || viralOverall;
+  const viralMonth = useMemo(() => viralOfMonth(posts, monthKey, 10, 50), [posts, monthKey]);
 
   useEffect(() => {
     // Notify only when #1 today changes.
@@ -102,11 +184,23 @@ export default function Shell() {
 
   const filteredPosts = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return posts;
-    return posts.filter((p) => String(p.text || "").toLowerCase().includes(q));
-  }, [posts, query]);
+    const langFilter = Array.isArray(account?.feedLanguages) && account.feedLanguages.length > 0
+      ? new Set(account.feedLanguages.map((l) => String(l).toLowerCase()))
+      : null;
 
-  const canPost = composerText.trim().length > 0 && composerText.length <= MAX_LEN;
+    return (posts || []).filter((p) => {
+      const lang = String(p?.language || "English").toLowerCase();
+      if (langFilter && !langFilter.has(lang)) return false;
+      if (!q) return true;
+      const hay = `${p?.title || ""}\n${p?.text || ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [account?.feedLanguages, posts, query]);
+
+  const canPost =
+    composerTitle.trim().length > 0 &&
+    composerTitle.length <= MAX_TITLE &&
+    composerBody.length <= MAX_LEN;
 
   function submitPost(e) {
     e.preventDefault();
@@ -115,12 +209,15 @@ export default function Shell() {
     const newPost = {
       id: uid(),
       authorInitial: "U",
-      authorName: "You",
-      authorHandle: "@user",
+      authorName: account?.username ? account.username : "You",
+      authorHandle: account?.handle ? account.handle : "@user",
       didShit: false,
-      text: normalizeHashToShit(composerText.trim()),
+      didLike: false,
+      title: normalizeHashToShit(composerTitle.trim()),
+      text: normalizeHashToShit(composerBody.trim()),
+      language: String(composerLanguage || account?.languages?.[0] || "English"),
       createdAt: new Date().toISOString(),
-      stats: { shit: 0, shitcomment: 0, repostshit: 0, shareshit: 0 },
+      stats: { shit: 0, like: 0, shitcomment: 0, repostshit: 0, shareshit: 0 },
     };
 
     if (useFirestore && firebase?.db) {
@@ -128,7 +225,8 @@ export default function Shell() {
     } else {
       setPosts((prev) => [newPost, ...prev]);
     }
-    setComposerText("");
+    setComposerTitle("");
+    setComposerBody("");
   }
 
   function ensureShit(postId) {
@@ -136,9 +234,20 @@ export default function Shell() {
       prev.map((p) => {
         if (p.id !== postId) return p;
         if (p.didShit) return p;
-        const stats = p.stats || { shit: 0, shitcomment: 0, repostshit: 0, shareshit: 0 };
+        const stats = p.stats || { shit: 0, like: 0, shitcomment: 0, repostshit: 0, shareshit: 0 };
+        const nextStats = { ...stats, shit: (stats.shit || 0) + 1 };
+        let nextDidLike = Boolean(p.didLike);
+
+        if (nextDidLike) {
+          nextDidLike = false;
+          const likeWas = Number(nextStats.like || 0) || 0;
+          nextStats.like = Math.max(0, likeWas - 1);
+          if (useFirestore && firebase?.db && likeWas > 0) incPostStat(firebase.db, postId, "like", -1).catch(() => {});
+        }
+
         if (useFirestore && firebase?.db) incPostStat(firebase.db, postId, "shit", 1).catch(() => {});
-        return { ...p, didShit: true, stats: { ...stats, shit: (stats.shit || 0) + 1 } };
+        setPostReaction(postId, { didShit: true, didLike: nextDidLike });
+        return { ...p, didShit: true, didLike: nextDidLike, stats: nextStats };
       })
     );
   }
@@ -147,12 +256,62 @@ export default function Shell() {
     setPosts((prev) =>
       prev.map((p) => {
         if (p.id !== postId) return p;
-        const stats = p.stats || { shit: 0, shitcomment: 0, repostshit: 0, shareshit: 0 };
-        const nextDidShit = !p.didShit;
-        const delta = nextDidShit ? 1 : -1;
-        const nextShit = Math.max(0, (stats.shit || 0) + delta);
-        if (useFirestore && firebase?.db) incPostStat(firebase.db, postId, "shit", delta).catch(() => {});
-        return { ...p, didShit: nextDidShit, stats: { ...stats, shit: nextShit } };
+        const stats = p.stats || { shit: 0, like: 0, shitcomment: 0, repostshit: 0, shareshit: 0 };
+        let didShit = Boolean(p.didShit);
+        let didLike = Boolean(p.didLike);
+        const nextStats = { ...stats };
+
+        if (didShit) {
+          didShit = false;
+          const shitWas = Number(nextStats.shit || 0) || 0;
+          nextStats.shit = Math.max(0, shitWas - 1);
+          if (useFirestore && firebase?.db && shitWas > 0) incPostStat(firebase.db, postId, "shit", -1).catch(() => {});
+        } else {
+          didShit = true;
+          nextStats.shit = (nextStats.shit || 0) + 1;
+          if (useFirestore && firebase?.db) incPostStat(firebase.db, postId, "shit", 1).catch(() => {});
+          if (didLike) {
+            didLike = false;
+            const likeWas = Number(nextStats.like || 0) || 0;
+            nextStats.like = Math.max(0, likeWas - 1);
+            if (useFirestore && firebase?.db && likeWas > 0) incPostStat(firebase.db, postId, "like", -1).catch(() => {});
+          }
+        }
+
+        setPostReaction(postId, { didShit, didLike });
+        return { ...p, didShit, didLike, stats: nextStats };
+      })
+    );
+  }
+
+  function toggleLike(postId) {
+    setPosts((prev) =>
+      prev.map((p) => {
+        if (p.id !== postId) return p;
+        const stats = p.stats || { shit: 0, like: 0, shitcomment: 0, repostshit: 0, shareshit: 0 };
+        let didShit = Boolean(p.didShit);
+        let didLike = Boolean(p.didLike);
+        const nextStats = { ...stats };
+
+        if (didLike) {
+          didLike = false;
+          const likeWas = Number(nextStats.like || 0) || 0;
+          nextStats.like = Math.max(0, likeWas - 1);
+          if (useFirestore && firebase?.db && likeWas > 0) incPostStat(firebase.db, postId, "like", -1).catch(() => {});
+        } else {
+          didLike = true;
+          nextStats.like = (nextStats.like || 0) + 1;
+          if (useFirestore && firebase?.db) incPostStat(firebase.db, postId, "like", 1).catch(() => {});
+          if (didShit) {
+            didShit = false;
+            const shitWas = Number(nextStats.shit || 0) || 0;
+            nextStats.shit = Math.max(0, shitWas - 1);
+            if (useFirestore && firebase?.db && shitWas > 0) incPostStat(firebase.db, postId, "shit", -1).catch(() => {});
+          }
+        }
+
+        setPostReaction(postId, { didShit, didLike });
+        return { ...p, didShit, didLike, stats: nextStats };
       })
     );
   }
@@ -161,7 +320,7 @@ export default function Shell() {
     setPosts((prev) =>
       prev.map((p) => {
         if (p.id !== postId) return p;
-        const stats = p.stats || { shit: 0, shitcomment: 0, repostshit: 0, shareshit: 0 };
+        const stats = p.stats || { shit: 0, like: 0, shitcomment: 0, repostshit: 0, shareshit: 0 };
         if (useFirestore && firebase?.db) incPostStat(firebase.db, postId, key, 1).catch(() => {});
         return { ...p, stats: { ...stats, [key]: (stats[key] || 0) + 1 } };
       })
@@ -175,13 +334,21 @@ export default function Shell() {
 
   const ctxValue = useMemo(
     () => ({
-      composerRef,
+      composerTitleRef,
+      composerBodyRef,
       posts,
       filteredPosts,
-      viralPost,
       viralToday,
-      composerText,
-      setComposerText,
+      viralMonth,
+      monthKey,
+      account,
+      updateAccount,
+      composerTitle,
+      setComposerTitle,
+      composerBody,
+      setComposerBody,
+      composerLanguage,
+      setComposerLanguage,
       canPost,
       submitPost,
       query,
@@ -190,16 +357,34 @@ export default function Shell() {
       setNotifications,
       bumpStat,
       toggleShit,
+      toggleLike,
       ensureShit,
       wipeLocal,
+      useFirestore,
+      firebaseDb: firebase?.db || null,
     }),
-    [posts, filteredPosts, viralPost, viralToday, composerText, canPost, query, notifications]
+    [
+      posts,
+      filteredPosts,
+      viralToday,
+      viralMonth,
+      monthKey,
+      account,
+      composerTitle,
+      composerBody,
+      composerLanguage,
+      canPost,
+      query,
+      notifications,
+      useFirestore,
+      firebase?.db,
+    ]
   );
 
   const topTags = useMemo(() => {
     const counts = new Map();
     for (const p of posts || []) {
-      const tags = extractHashtags(p?.text);
+      const tags = extractHashtags(`${p?.title || ""} ${p?.text || ""}`);
       for (const t of tags) {
         const key = String(t).toLowerCase();
         counts.set(key, (counts.get(key) || 0) + 1);
@@ -217,13 +402,14 @@ export default function Shell() {
     if (path.startsWith("/chat")) return "Chat";
     if (path.startsWith("/profile")) return "Profile";
     if (path.startsWith("/settings")) return "Settings";
+    if (path.startsWith("/viral")) return "Viral";
     return "Home";
   }, [location.pathname]);
 
   return (
     <ShellContext.Provider value={ctxValue}>
       <GlobalStyles />
-      <div className="app">
+      <div className="app" data-page={pageTitle.toLowerCase()}>
         <aside className="nav" aria-label="Primary">
           <NavLink className="brand" to="/" aria-label="Home">
             <img className="brandLogoImg" src={brandLogo} alt="" aria-hidden="true" />
@@ -260,7 +446,7 @@ export default function Shell() {
             </NavLink>
           </nav>
 
-          <button className="primaryCta" type="button" onClick={() => composerRef.current?.focus()}>
+          <button className="primaryCta" type="button" onClick={() => composerTitleRef.current?.focus()}>
             <span>Post</span>
             <Plus className="mobileOnly" size={24} />
           </button>
@@ -284,18 +470,29 @@ export default function Shell() {
             </div>
           </div>
 
-          {viralPost ? (
+          {viralMonth.length > 0 ? (
             <div className="widget">
-              <h2 className="widgetHeader">Viral</h2>
-              <div className="widgetBody">
-                <div className="viralMini">
-                  <div className="viralMiniTitle">{viralToday ? "#1 today" : "Top post"}</div>
-                  <div className="viralMiniText">{String(viralPost.text || "").slice(0, 90)}</div>
-                </div>
-                <NavLink className="widgetMore" to="/viral">
-                  View Viral
-                </NavLink>
-              </div>
+              <h2 className="widgetHeader">Viral of the Month</h2>
+              {viralMonth.map((p) => (
+                <button
+                  key={p.id}
+                  className="widgetItem"
+                  type="button"
+                  onClick={() => setQuery(String(p.title || p.text || "").slice(0, 32))}
+                  title="Search similar posts"
+                >
+                  <div className="widgetSubtitle">{monthKey} · Viral</div>
+                  <div className="widgetTitle">
+                    {String(p.title || p.text || "").replace(/\s+/g, " ").slice(0, 70)}
+                  </div>
+                  <div className="widgetMeta">
+                    {(p?.stats?.shit || 0)} Shits · {(p?.stats?.shitcomment || 0)} Comments
+                  </div>
+                </button>
+              ))}
+              <NavLink className="widgetMore" to="/viral">
+                View Viral of Month
+              </NavLink>
             </div>
           ) : null}
 
