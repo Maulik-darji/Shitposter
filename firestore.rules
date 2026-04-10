@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /posts/{postId} {
+      allow read: if true;
+
+      allow create: if request.auth != null
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 700;
+
+      // Prototype: allow signed-in users to update counters.
+      allow update: if request.auth != null;
+
+      allow delete: if false;
+    }
+  }
+}
+
